@@ -22,7 +22,7 @@ docker build -t <image-name>:<tag> .
 
 ## CI/CD
 
-This repository uses GitHub Actions to automatically build and push images to Docker Hub when changes are pushed to the main branch or when tags are created.
+This repository uses GitHub Actions to automatically build and test images.
 
 ### Automated Builds
 
