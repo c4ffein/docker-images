@@ -13,11 +13,8 @@ Restart=always
 RestartSec=10s
 
 # Environment variables
-Environment="IMAGE=nginx/nginx-acme:latest"
+Environment="IMAGE=nginx-acme:latest"
 Environment="CONTAINER_NAME=nginx-acme"
-
-# Pull the latest image on service start (optional, comment out if not needed)
-ExecStartPre=-/usr/bin/docker pull ${IMAGE}
 
 # Remove any existing container with the same name
 ExecStartPre=-/usr/bin/docker rm -f ${CONTAINER_NAME}

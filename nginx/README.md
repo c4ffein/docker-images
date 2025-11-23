@@ -239,4 +239,4 @@ docker exec nginx-acme ls -la /etc/nginx/acme/certs/
 
 ## CI/CD Pipeline
 
-See the root repository for GitHub Actions workflow examples that automatically build and push this image to Docker Hub.
+The GitHub Actions workflow (`.github/workflows/build-nginx.yml`) automatically builds and tests this image on every push to ensure the build process works correctly.

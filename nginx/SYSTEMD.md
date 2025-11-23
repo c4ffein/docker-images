@@ -5,7 +5,7 @@ Run the nginx-acme Docker container as a systemd service that uses `/etc/nginx` 
 ## Prerequisites
 
 - Docker installed and running
-- nginx-acme image available: `docker pull nginx/nginx-acme:latest` (or build locally)
+- nginx-acme image built locally: `make nginx-build` (from repository root)
 
 ## Installation
 
@@ -161,17 +161,11 @@ The service includes:
 Edit `/etc/systemd/system/nginx-docker.service` to change:
 
 ```systemd
-Environment="IMAGE=nginx/nginx-acme:latest"        # Image to use
+Environment="IMAGE=nginx-acme:latest"              # Local image tag
 Environment="CONTAINER_NAME=nginx-acme"            # Container name
 ```
 
-### Disable Auto-Updates
-
-Comment out the pull line to control updates manually:
-
-```systemd
-# ExecStartPre=-/usr/bin/docker pull ${IMAGE}
-```
+Note: The service uses the locally built image. Rebuild with `make nginx-build` to update.
 
 ### Use Bridge Networking
 
@@ -199,7 +193,7 @@ sudo docker logs nginx-acme
 # Test config manually
 sudo docker run --rm \
   -v /etc/nginx:/etc/nginx:ro \
-  nginx/nginx-acme:latest nginx -t
+  nginx-acme:latest nginx -t
 ```
 
 ### Configuration errors
@@ -238,14 +232,15 @@ sudo systemctl start nginx-docker
 ## Upgrading
 
 ```bash
-# Pull new image
-sudo docker pull nginx/nginx-acme:latest
+# Rebuild the image with latest changes
+cd /path/to/docker-images
+make nginx-build
 
-# Restart service (uses new image)
+# Restart service to use new image
 sudo systemctl restart nginx-docker
 ```
 
-Or enable auto-pull (already enabled by default) and just restart.
+The service always uses the locally built `nginx-acme:latest` image.
 
 ## Backup & Restore
 

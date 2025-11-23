@@ -152,13 +152,19 @@ if [ ! -d /var/log/nginx ]; then
     echo -e "${GREEN}✓${NC} Created /var/log/nginx/"
 fi
 
-# Ask if user wants to pull the image now
+# Check if the local image exists
 echo ""
-read -p "Pull nginx/nginx-acme:latest image now? [Y/n]: " pull_now
-if [[ ! $pull_now =~ ^[Nn]$ ]]; then
-    echo -e "${BLUE}→${NC} Pulling Docker image..."
-    docker pull nginx/nginx-acme:latest
-    echo -e "${GREEN}✓${NC} Image pulled"
+echo -e "${BLUE}→${NC} Checking for local Docker image..."
+if docker image inspect nginx-acme:latest &> /dev/null; then
+    echo -e "${GREEN}✓${NC} Found nginx-acme:latest image"
+else
+    echo -e "${RED}✗ nginx-acme:latest image not found${NC}"
+    echo ""
+    echo "Build the image first with:"
+    echo "  cd /home/debian/docker-images"
+    echo "  make nginx-build"
+    echo ""
+    exit 1
 fi
 
 # Ask if user wants to enable and start now
