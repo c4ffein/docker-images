@@ -31,13 +31,3 @@ This repository uses GitHub Actions to automatically build and test images.
 ## License
 
 This repository is licensed under the MIT License. See [LICENSE](./LICENSE) for details.
-
-Individual images may use components with different licenses. Check each image's README for specific license information.
-
-## Support
-
-For issues, questions, or suggestions:
-
-- Open an issue on GitHub
-- Check individual image READMEs for specific documentation
-- Review the Dockerfile comments for implementation details
