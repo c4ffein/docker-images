@@ -59,7 +59,11 @@ jobs:
       - name: Test HTTP server
         run: |
           echo "Testing HTTP server..."
-          docker run -d --name nginx-test -p 8080:80 nginx-acme:latest
+          # Create test content
+          mkdir -p /tmp/test-www
+          echo "<html><body>Test OK</body></html>" > /tmp/test-www/index.html
+          # Run nginx with test content mounted
+          docker run -d --name nginx-test -p 8080:80 -v /tmp/test-www:/var/www/html:ro nginx-acme:latest
           sleep 5
           curl -f http://localhost:8080 || exit 1
           docker stop nginx-test
