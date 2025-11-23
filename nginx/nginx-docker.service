@@ -19,8 +19,8 @@ Environment="CONTAINER_NAME=nginx-acme"
 # Remove any existing container with the same name
 ExecStartPre=-/usr/bin/docker rm -f ${CONTAINER_NAME}
 
-# Create ACME certificate volume if it doesn't exist
-ExecStartPre=-/usr/bin/docker volume create nginx-acme-certs
+# Create ACME directory if it doesn't exist
+ExecStartPre=-/bin/mkdir -p /var/nginx-acme
 
 # Start the nginx container with full feature parity
 ExecStart=/usr/bin/docker run --rm \
@@ -34,10 +34,9 @@ ExecStart=/usr/bin/docker run --rm \
     --health-timeout=10s \
     --health-retries=3 \
     --health-start-period=10s \
-    -v /etc/nginx:/etc/nginx \
+    -v /etc/nginx:/etc/nginx:ro \
     -v /var/www:/var/www:ro \
-    # TODO: Move ACME certs to separate path (e.g., /var/lib/nginx-acme) to make /etc/nginx read-only for security
-    -v nginx-acme-certs:/etc/nginx/acme \
+    -v /var/nginx-acme:/var/nginx-acme \
     -v /var/log/nginx:/var/log/nginx \
     ${IMAGE}
 

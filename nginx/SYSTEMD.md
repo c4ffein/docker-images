@@ -45,11 +45,14 @@ The service uses these directories on the host:
 ```
 /etc/nginx/              # nginx configuration (mounted read-only)
 ├── nginx.conf           # Main configuration
-├── conf.d/              # Additional server configs
-└── acme/                # ACME certificates (managed by container)
+└── conf.d/              # Additional server configs
 
 /var/www/                # Web content (mounted read-only)
 └── html/                # Default web root
+
+/var/nginx-acme/         # ACME certificates (mounted read-write)
+├── certs/               # SSL certificates
+└── acme-challenge/      # ACME HTTP-01 challenges
 
 /var/log/nginx/          # nginx logs (optional, also in Docker logs)
 ```
@@ -246,18 +249,12 @@ The service always uses the locally built `nginx-acme:latest` image.
 
 ### Backup ACME Certificates
 ```bash
-docker run --rm \
-  -v nginx-acme-certs:/data \
-  -v $(pwd):/backup \
-  alpine tar czf /backup/acme-backup.tar.gz /data
+sudo tar czf acme-backup.tar.gz /var/nginx-acme
 ```
 
 ### Restore ACME Certificates
 ```bash
-docker run --rm \
-  -v nginx-acme-certs:/data \
-  -v $(pwd):/backup \
-  alpine tar xzf /backup/acme-backup.tar.gz -C /
+sudo tar xzf acme-backup.tar.gz -C /
 ```
 
 ### Backup nginx Config
@@ -278,9 +275,11 @@ sudo rm /etc/systemd/system/nginx-docker.service
 # Reload systemd
 sudo systemctl daemon-reload
 
-# Optional: Remove container and volumes
+# Optional: Remove container
 docker rm -f nginx-acme
-docker volume rm nginx-acme-certs
+
+# Optional: Remove ACME certificates (WARNING: This deletes all certificates!)
+# sudo rm -rf /var/nginx-acme
 ```
 
 ## Security

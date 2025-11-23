@@ -152,6 +152,14 @@ if [ ! -d /var/log/nginx ]; then
     echo -e "${GREEN}✓${NC} Created /var/log/nginx/"
 fi
 
+# Create ACME directory
+if [ ! -d /var/nginx-acme ]; then
+    mkdir -p /var/nginx-acme
+    echo -e "${GREEN}✓${NC} Created /var/nginx-acme/"
+else
+    echo -e "${YELLOW}!${NC} /var/nginx-acme/ already exists (skipping)"
+fi
+
 # Check if the local image exists
 echo ""
 echo -e "${BLUE}→${NC} Checking for local Docker image..."
