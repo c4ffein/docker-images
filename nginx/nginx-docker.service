@@ -1,0 +1,68 @@
+[Unit]
+Description=nginx with ACME Module (Docker)
+Documentation=https://github.com/nginx/nginx-acme
+After=docker.service network-online.target
+Requires=docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+TimeoutStartSec=0
+TimeoutStopSec=30
+Restart=always
+RestartSec=10s
+
+# Environment variables
+Environment="IMAGE=nginx/nginx-acme:latest"
+Environment="CONTAINER_NAME=nginx-acme"
+
+# Pull the latest image on service start (optional, comment out if not needed)
+ExecStartPre=-/usr/bin/docker pull ${IMAGE}
+
+# Remove any existing container with the same name
+ExecStartPre=-/usr/bin/docker rm -f ${CONTAINER_NAME}
+
+# Create ACME certificate volume if it doesn't exist
+ExecStartPre=-/usr/bin/docker volume create nginx-acme-certs
+
+# Start the nginx container with full feature parity
+ExecStart=/usr/bin/docker run --rm \
+    --name ${CONTAINER_NAME} \
+    --network host \
+    --log-driver json-file \
+    --log-opt max-size=10m \
+    --log-opt max-file=3 \
+    --health-cmd="nginx -t" \
+    --health-interval=30s \
+    --health-timeout=10s \
+    --health-retries=3 \
+    --health-start-period=10s \
+    -v /etc/nginx:/etc/nginx:ro \
+    -v /var/www:/var/www:ro \
+    -v nginx-acme-certs:/etc/nginx/acme \
+    -v /var/log/nginx:/var/log/nginx \
+    ${IMAGE}
+
+# Stop the container gracefully
+ExecStop=/usr/bin/docker stop -t 30 ${CONTAINER_NAME}
+
+# Reload nginx configuration without restarting container
+ExecReload=/usr/bin/docker exec ${CONTAINER_NAME} nginx -s reload
+
+# Verify config before reload
+ExecReload=/usr/bin/docker exec ${CONTAINER_NAME} nginx -t
+
+# Health check after start
+ExecStartPost=/bin/sleep 3
+ExecStartPost=-/usr/bin/docker exec ${CONTAINER_NAME} nginx -t
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/etc
+ReadWritePaths=/var/log/nginx
+
+[Install]
+WantedBy=multi-user.target
