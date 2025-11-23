@@ -1,31 +1,41 @@
-# Multi-stage build for nginx with ACME support
-# Use Debian for building (glibc for Rust bindgen compatibility)
-FROM debian:bookworm-slim AS builder
+# Multi-stage build for nginx with ACME support on Alpine
+FROM alpine:3.19 AS builder
 
 # nginx version to build
 ARG NGINX_VERSION=1.26.2
 ARG ACME_MODULE_VERSION=master
 
 # Install build dependencies
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    libssl-dev \
-    libpcre2-dev \
-    zlib1g-dev \
-    libxslt1-dev \
-    libgd-dev \
-    libgeoip-dev \
+RUN apk add --no-cache \
+    gcc \
+    g++ \
+    libc-dev \
+    make \
+    openssl-dev \
+    pcre2-dev \
+    zlib-dev \
+    linux-headers \
     curl \
     git \
-    clang \
-    llvm \
-    libclang-dev \
-    pkg-config \
-    && rm -rf /var/lib/apt/lists/*
+    libxml2-dev \
+    libxslt-dev \
+    gd-dev \
+    geoip-dev \
+    clang17-dev \
+    clang17-static \
+    clang17-libclang \
+    llvm17-dev \
+    llvm17-static
 
-# Install Rust via rustup
+# Install Rust via rustup (Alpine's Rust is too old for ACME module)
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
 ENV PATH="/root/.cargo/bin:${PATH}"
+
+# Configure for static linking with libclang
+ENV LIBCLANG_PATH=/usr/lib
+ENV LIBCLANG_STATIC_PATH=/usr/lib
+ENV CLANG_PATH=/usr/bin/clang
+ENV RUSTFLAGS="-C target-feature=-crt-static"
 
 # Download and verify nginx
 WORKDIR /usr/src
@@ -94,21 +104,22 @@ RUN mkdir -p /var/cache/nginx/client_temp \
     /var/cache/nginx/uwsgi_temp \
     /var/cache/nginx/scgi_temp
 
-# Final stage - minimal Debian runtime image
-FROM debian:bookworm-slim
+# Final stage - minimal Alpine runtime image
+FROM alpine:3.19
 
 # Install runtime dependencies
-RUN apt-get update && apt-get install -y \
+RUN apk add --no-cache \
     ca-certificates \
-    libssl3 \
-    libpcre2-8-0 \
-    zlib1g \
-    libxslt1.1 \
-    libgd3 \
-    libgeoip1 \
+    openssl \
+    pcre2 \
+    zlib \
+    libxslt \
+    gd \
+    geoip \
     curl \
     tzdata \
-    && rm -rf /var/lib/apt/lists/*
+    libgcc \
+    libstdc++
 
 # Copy nginx from builder
 COPY --from=builder /usr/sbin/nginx /usr/sbin/nginx
@@ -117,8 +128,8 @@ COPY --from=builder /usr/lib/nginx/modules /usr/lib/nginx/modules
 COPY --from=builder /var/cache/nginx /var/cache/nginx
 
 # Create nginx user
-RUN groupadd -g 101 nginx && \
-    useradd -r -u 101 -g nginx -d /var/cache/nginx -s /usr/sbin/nologin nginx
+RUN addgroup -g 101 -S nginx && \
+    adduser -S -D -H -u 101 -h /var/cache/nginx -s /sbin/nologin -G nginx -g nginx nginx
 
 # Create necessary directories and set permissions
 RUN mkdir -p /var/log/nginx /var/www/html /etc/nginx/acme && \
