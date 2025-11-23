@@ -53,7 +53,8 @@ jobs:
       - name: Test ACME module
         run: |
           echo "Testing ACME module..."
-          docker run --rm nginx-acme:latest nginx -V 2>&1 | grep -q "ngx_http_acme_module" && echo "ACME module found" || exit 1
+          docker run --rm nginx-acme:latest ls -la /usr/lib/nginx/modules/ngx_http_acme_module.so
+          docker run --rm nginx-acme:latest nginx -V 2>&1 | grep -q "add-dynamic-module=/usr/src/nginx-acme" && echo "ACME module compiled" || exit 1
 
       - name: Test HTTP server
         run: |
