@@ -24,10 +24,6 @@ docker build -t <image-name>:<tag> .
 
 This repository uses GitHub Actions to automatically build and test images.
 
-### Automated Builds
-
-- Just build locally, we may add tests later
-
 ## License
 
 This repository is licensed under the MIT License. See [LICENSE](./LICENSE) for details.
