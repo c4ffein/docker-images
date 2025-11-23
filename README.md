@@ -26,15 +26,7 @@ This repository uses GitHub Actions to automatically build and push images to Do
 
 ### Automated Builds
 
-- **On push to main**: Builds and pushes with `latest` tag
-- **On tag creation**: Builds and pushes with version tag (e.g., `v1.0.0`)
-
-### Prerequisites for CI/CD
-
-Set up the following secrets in your GitHub repository:
-
-- `DOCKERHUB_USERNAME`: Your Docker Hub username
-- `DOCKERHUB_TOKEN`: Your Docker Hub access token
+- Just build locally, we may add tests later
 
 ## License
 
