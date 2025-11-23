@@ -34,8 +34,9 @@ ExecStart=/usr/bin/docker run --rm \
     --health-timeout=10s \
     --health-retries=3 \
     --health-start-period=10s \
-    -v /etc/nginx:/etc/nginx:ro \
+    -v /etc/nginx:/etc/nginx \
     -v /var/www:/var/www:ro \
+    # TODO: Move ACME certs to separate path (e.g., /var/lib/nginx-acme) to make /etc/nginx read-only for security
     -v nginx-acme-certs:/etc/nginx/acme \
     -v /var/log/nginx:/var/log/nginx \
     ${IMAGE}
