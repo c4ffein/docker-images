@@ -1,22 +1,19 @@
 # Docker Images Collection
 
-A collection of custom Docker images optimized for production use, built on Alpine Linux for minimal size and maximum security.
+A collection of custom Docker images optimized for my needs
+
+## Quick Start
+
+The easiest way to work with these images is using the Makefile - see `make help`
 
 ## Available Images
 
 ### nginx with ACME Module
 A lightweight nginx image with built-in ACME module support for automated SSL/TLS certificate management, on top of Alpine.
 
-**Quick Start**:
-```bash
-cd nginx
-docker build -t nginx-acme:latest .
-docker run -d -p 80:80 -p 443:443 nginx-acme:latest
-```
+## Building Images Manually
 
-## Building Images
-
-Each image directory contains its own Dockerfile and documentation. To build an image:
+Each image directory contains its own Dockerfile and documentation:
 
 ```bash
 cd <image-directory>
