@@ -43,11 +43,8 @@ ExecStart=/usr/bin/docker run --rm \
 # Stop the container gracefully
 ExecStop=/usr/bin/docker stop -t 30 ${CONTAINER_NAME}
 
-# Reload nginx configuration without restarting container
-ExecReload=/usr/bin/docker exec ${CONTAINER_NAME} nginx -s reload
-
-# Verify config before reload
-ExecReload=/usr/bin/docker exec ${CONTAINER_NAME} nginx -t
+# Reload nginx configuration (test config first, then send HUP signal)
+ExecReload=/bin/sh -c '/usr/bin/docker exec ${CONTAINER_NAME} nginx -t && /usr/bin/docker kill -s HUP ${CONTAINER_NAME}'
 
 # Health check after start
 ExecStartPost=/bin/sleep 3
