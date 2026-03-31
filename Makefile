@@ -1,4 +1,4 @@
-.PHONY: help build clean test push run stop logs shell nginx-build nginx-test nginx-clean nginx-run nginx-stop
+.PHONY: help build clean test push run stop logs shell nginx-build nginx-test nginx-clean nginx-run nginx-stop dev-build dev-run dev-stop dev-shell dev-clean
 
 # Default target
 .DEFAULT_GOAL := help
@@ -8,7 +8,7 @@ DOCKER_REGISTRY ?= nginx
 DOCKER_TAG ?= latest
 
 # Image list
-IMAGES := nginx
+IMAGES := nginx dev
 
 # Colors for output
 COLOR_RESET := \033[0m
@@ -32,6 +32,11 @@ build: ## Build all Docker images
 		$(MAKE) $$image-build || exit 1; \
 	done
 	@echo "$(COLOR_GREEN)All images built successfully!$(COLOR_RESET)"
+
+dev-build: ## Build dev environment image
+	@echo "$(COLOR_YELLOW)Building dev image...$(COLOR_RESET)"
+	@cd dev && docker compose build
+	@echo "$(COLOR_GREEN)dev image built$(COLOR_RESET)"
 
 nginx-build: ## Build nginx image
 	@echo "$(COLOR_YELLOW)Building nginx image...$(COLOR_RESET)"
@@ -72,6 +77,11 @@ run: ## Run all services with docker-compose
 		$(MAKE) $$image-run; \
 	done
 
+dev-run: ## Run dev environment container
+	@echo "$(COLOR_YELLOW)Starting dev environment...$(COLOR_RESET)"
+	@cd dev && docker compose up -d
+	@echo "$(COLOR_GREEN)dev environment is running$(COLOR_RESET)"
+
 nginx-run: ## Run nginx container
 	@echo "$(COLOR_YELLOW)Starting nginx...$(COLOR_RESET)"
 	@cd nginx && docker compose up -d
@@ -83,6 +93,17 @@ stop: ## Stop all running containers
 		$(MAKE) $$image-stop 2>/dev/null || true; \
 	done
 	@echo "$(COLOR_GREEN)All services stopped$(COLOR_RESET)"
+
+dev-stop: ## Stop dev environment container
+	@echo "$(COLOR_YELLOW)Stopping dev environment...$(COLOR_RESET)"
+	@cd dev && docker compose down
+
+dev-shell: ## Open shell in dev container
+	@docker exec -it dev-env /bin/bash
+
+dev-clean: ## Clean dev resources
+	@cd dev && docker compose down -v 2>/dev/null || true
+	@docker rm -f dev-env 2>/dev/null || true
 
 nginx-stop: ## Stop nginx container
 	@echo "$(COLOR_YELLOW)Stopping nginx...$(COLOR_RESET)"
