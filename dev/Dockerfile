@@ -5,11 +5,13 @@ ENV COLORTERM=truecolor
 
 # Install system packages
 RUN apt-get update && apt-get install -y \
-    git \
-    curl \
     build-essential \
-    neovim \
     ca-certificates \
+    curl \
+    gh \
+    git \
+    just \
+    neovim \
     unzip \
     && rm -rf /var/lib/apt/lists/*
 
