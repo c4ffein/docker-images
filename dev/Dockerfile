@@ -5,14 +5,18 @@ ENV COLORTERM=truecolor
 
 # Install system packages
 RUN apt-get update && apt-get install -y \
+    bison \
     build-essential \
     ca-certificates \
     curl \
+    flex \
     gh \
     git \
     just \
+    libopenmpi-dev \
     neovim \
     unzip \
+    zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Create dev user with bash
