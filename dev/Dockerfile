@@ -27,13 +27,16 @@ USER dev
 WORKDIR /home/dev
 
 # Setup PATH in .bashrc
-RUN echo 'export PATH="$HOME/.local/bin:$HOME/.bun/bin:$PATH"' >> ~/.bashrc
+RUN echo 'export PATH="$HOME/.local/bin:$HOME/.bun/bin:$HOME/.cargo/bin:$PATH"' >> ~/.bashrc
 
 # Install uv
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 
 # Install bun
 RUN curl -fsSL https://bun.sh/install | bash
+
+# Install Rust
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 
 # Install Claude Code (standalone binary)
 RUN curl -fsSL https://claude.ai/install.sh | bash
