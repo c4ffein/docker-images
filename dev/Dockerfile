@@ -15,6 +15,7 @@ RUN apt-get update && apt-get install -y \
     just \
     libopenmpi-dev \
     neovim \
+    tini \
     unzip \
     zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
@@ -59,4 +60,5 @@ RUN echo '[ -f "$HOME/.local/env.sh" ] && . "$HOME/.local/env.sh"' >> ~/.bashrc
 # Source .bashrc on login shells too
 RUN echo '[ -f "$HOME/.bashrc" ] && . "$HOME/.bashrc"' >> ~/.profile
 
+ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["/bin/bash"]
