@@ -17,6 +17,7 @@ RUN apt-get update && apt-get install -y \
     neovim \
     tini \
     unzip \
+    zip \
     zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
 
