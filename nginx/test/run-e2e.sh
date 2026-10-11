@@ -93,28 +93,33 @@ docker run -d --name "$C_NGINX" --network "$NET" --ip "$IP_NGINX" "${HARDENING[@
     -v "$VOL_STATE:/var/nginx-acme" \
     "$IMAGE" >/dev/null
 
+# Until the certificate is issued, $acme_certificate is empty and nginx logs
+# `cannot load certificate "/etc/nginx/"` on each handshake attempt. That is
+# expected noise from this polling loop, not a failure.
 echo "→ Waiting for nginx to obtain a certificate from Pebble (up to ${TIMEOUT_SECONDS}s)..."
 deadline=$((SECONDS + TIMEOUT_SECONDS))
-cert=""
+pem=""
 while [ $SECONDS -lt $deadline ]; do
-    cert=$(openssl s_client -connect 127.0.0.1:8443 -servername e2e.test </dev/null 2>/dev/null \
-        | openssl x509 -noout -issuer -subject 2>/dev/null || true)
-    case "$cert" in
+    pem=$(openssl s_client -connect 127.0.0.1:8443 -servername e2e.test </dev/null 2>/dev/null \
+        | openssl x509 2>/dev/null || true)
+    case "$(printf '%s' "$pem" | openssl x509 -noout -issuer 2>/dev/null)" in
         *Pebble*) break ;;
     esac
-    cert=""
+    pem=""
     sleep 3
 done
 
-if [ -z "$cert" ]; then
+if [ -z "$pem" ]; then
     echo "✗ no Pebble-issued certificate after ${TIMEOUT_SECONDS}s"
     exit 1
 fi
 
-echo "$cert" | sed 's/^/    /'
+printf '%s' "$pem" | openssl x509 -noout -issuer -subject -ext subjectAltName | sed 's/^/    /'
 
-case "$cert" in
-    *CN=e2e.test*|*CN\ =\ e2e.test*) ;;
+# Pebble issues certificates with an empty subject (no CN) and the name only
+# in the SAN, like Let's Encrypt does since 2025, so check the SAN.
+case "$(printf '%s' "$pem" | openssl x509 -noout -ext subjectAltName 2>/dev/null)" in
+    *DNS:e2e.test*) ;;
     *) echo "✗ certificate is not for e2e.test"; exit 1 ;;
 esac
 
