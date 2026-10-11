@@ -1,12 +1,12 @@
 .PHONY: help build test run stop logs shell clean clean-all push rebuild check info watch-logs \
-	nginx-build nginx-test nginx-e2e nginx-run nginx-stop nginx-logs nginx-shell nginx-clean nginx-push nginx-rebuild \
+	nginx-build nginx-test nginx-e2e nginx-run nginx-stop nginx-reload nginx-logs nginx-shell nginx-clean nginx-push nginx-rebuild \
 	dev-build dev-test dev-run dev-stop dev-shell dev-clean
 
 # Default target
 .DEFAULT_GOAL := help
 
 # Docker Hub configuration. DOCKER_REGISTRY is empty by default so the local
-# image name matches what docker-compose.yml and the systemd unit expect
+# image name matches what the systemd unit and the test scripts expect
 # (nginx-acme:latest). Set it to push: make nginx-push DOCKER_REGISTRY=youruser
 DOCKER_REGISTRY ?=
 DOCKER_TAG ?= latest
@@ -16,6 +16,14 @@ DEV_IMAGE   := $(if $(DOCKER_REGISTRY),$(DOCKER_REGISTRY)/,)dev-env:$(DOCKER_TAG
 
 # Host port used by the nginx smoke test
 NGINX_TEST_PORT ?= 8080
+
+# Runtime hardening for the nginx container. The image runs as uid 101 with
+# everything writable under /tmp, so the root filesystem can be read-only and
+# every capability dropped. Keep in sync with nginx/nginx-docker.service and
+# the HARDENING array in nginx/test/run-smoke.sh and run-e2e.sh.
+NGINX_HARDENING := --read-only --tmpfs /tmp:rw,noexec,nosuid,size=64m \
+	--cap-drop ALL --cap-add NET_BIND_SERVICE \
+	--security-opt no-new-privileges --pids-limit 256
 
 # Image list
 IMAGES := nginx dev
@@ -50,8 +58,7 @@ dev-build: ## Build dev environment image
 
 nginx-build: ## Build nginx image
 	@echo "$(COLOR_YELLOW)Building nginx image...$(COLOR_RESET)"
-	@cd nginx && docker compose build
-	@docker tag nginx-acme:latest $(NGINX_IMAGE)
+	@docker build -t $(NGINX_IMAGE) nginx
 	@echo "$(COLOR_GREEN)nginx image built: $(NGINX_IMAGE)$(COLOR_RESET)"
 
 ##@ Test
@@ -83,17 +90,17 @@ dev-test: ## Test dev environment image (toolchain on PATH, runs as dev)
 
 nginx-test: ## Test nginx image (module, config, HTTP, health check)
 	@echo "$(COLOR_YELLOW)Testing nginx image...$(COLOR_RESET)"
-	@NGINX_TEST_PORT=$(NGINX_TEST_PORT) nginx/test/run-smoke.sh $(NGINX_IMAGE)
+	@NGINX_TEST_PORT=$(NGINX_TEST_PORT) bash nginx/test/run-smoke.sh $(NGINX_IMAGE)
 	@echo "$(COLOR_GREEN)nginx image tests passed!$(COLOR_RESET)"
 
 nginx-e2e: ## Run the end-to-end ACME test (Pebble, offline, no domain needed)
 	@echo "$(COLOR_YELLOW)Running nginx ACME end-to-end test...$(COLOR_RESET)"
-	@nginx/test/run-e2e.sh
+	@bash nginx/test/run-e2e.sh
 	@echo "$(COLOR_GREEN)nginx end-to-end test passed!$(COLOR_RESET)"
 
 ##@ Run
 
-run: ## Run all services with docker-compose
+run: ## Run all services
 	@echo "$(COLOR_GREEN)Starting all services...$(COLOR_RESET)"
 	@for image in $(IMAGES); do \
 		$(MAKE) $$image-run; \
@@ -104,9 +111,15 @@ dev-run: ## Run dev environment container (repo mounted at ~/workspace)
 	@docker run -d --name dev-env -v $(CURDIR):/home/dev/workspace $(DEV_IMAGE) sleep infinity > /dev/null
 	@echo "$(COLOR_GREEN)dev environment is running - make dev-shell to enter$(COLOR_RESET)"
 
-nginx-run: ## Run nginx container
+nginx-run: ## Run nginx container (ports 80/443, html/ and conf.d/ mounted, hardened)
 	@echo "$(COLOR_YELLOW)Starting nginx...$(COLOR_RESET)"
-	@cd nginx && docker compose up -d
+	@docker volume create nginx-acme-state > /dev/null
+	@docker run -d --name nginx-acme --restart unless-stopped \
+		-p 80:80 -p 443:443 \
+		-v $(CURDIR)/nginx/html:/var/www/html:ro \
+		-v $(CURDIR)/nginx/conf.d:/etc/nginx/conf.d:ro \
+		-v nginx-acme-state:/var/nginx-acme \
+		$(NGINX_HARDENING) $(NGINX_IMAGE) > /dev/null
 	@echo "$(COLOR_GREEN)nginx is running at http://localhost$(COLOR_RESET)"
 
 stop: ## Stop all running containers
@@ -127,16 +140,20 @@ dev-clean: ## Clean dev resources
 	@docker rm -f dev-env 2>/dev/null || true
 	@docker rmi -f $(DEV_IMAGE) 2>/dev/null || true
 
-nginx-stop: ## Stop nginx container
+nginx-stop: ## Stop and remove nginx container (ACME state volume is kept)
 	@echo "$(COLOR_YELLOW)Stopping nginx...$(COLOR_RESET)"
-	@cd nginx && docker compose down
+	@docker rm -f nginx-acme 2>/dev/null || true
+
+nginx-reload: ## Reload nginx config (nginx -t first)
+	@docker exec nginx-acme nginx -t && docker kill -s HUP nginx-acme > /dev/null
+	@echo "$(COLOR_GREEN)nginx reloaded$(COLOR_RESET)"
 
 ##@ Logs
 
 logs: nginx-logs ## View logs from all services
 
 nginx-logs: ## View nginx logs
-	@cd nginx && docker compose logs -f
+	@docker logs -f nginx-acme
 
 ##@ Utilities
 
@@ -160,9 +177,9 @@ clean: ## Clean all Docker images, containers, and volumes
 	@docker builder prune -f > /dev/null 2>&1 || true
 	@echo "$(COLOR_GREEN)Cleanup complete!$(COLOR_RESET)"
 
-nginx-clean: ## Clean nginx resources
-	@cd nginx && docker compose down -v 2>/dev/null || true
+nginx-clean: ## Clean nginx resources, INCLUDING the ACME state volume
 	@docker rm -f nginx-acme nginx-acme-smoke 2>/dev/null || true
+	@docker volume rm nginx-acme-state 2>/dev/null || true
 
 clean-all: clean ## Deep clean including volumes and build cache
 	@echo "$(COLOR_YELLOW)Performing deep clean...$(COLOR_RESET)"
@@ -191,15 +208,12 @@ rebuild: clean build ## Clean and rebuild all images
 
 nginx-rebuild: nginx-clean nginx-build ## Clean and rebuild nginx image
 
-watch-logs: ## Watch logs from all running containers
-	@docker compose -f nginx/docker-compose.yml logs -f
+watch-logs: nginx-logs ## Watch logs from all running containers
 
 check: ## Check system requirements and configuration
 	@echo "$(COLOR_BOLD)System Check$(COLOR_RESET)"
 	@echo "  → Docker version:"
 	@docker --version
-	@echo "  → Docker Compose version:"
-	@docker compose version
 	@echo "  → Available images:"
 	@docker images | grep -E "REPOSITORY|nginx-acme|dev-env" || echo "    No images built yet"
 	@echo "  → Running containers:"

@@ -9,10 +9,12 @@ The easiest way to work with these images is using the Makefile - see `make help
 ## Available Images
 
 ### nginx with ACME Module
-nginx on Alpine that obtains and renews Let's Encrypt certificates by itself,
-through the official [nginx-acme](https://github.com/nginx/nginx-acme) module -
-no certbot, no cron. Built on the upstream `nginx:mainline-alpine` image, which
-ships the module since nginx 1.29, so nothing is compiled here.
+Non-root nginx on Alpine that obtains and renews Let's Encrypt certificates by
+itself, through the official [nginx-acme](https://github.com/nginx/nginx-acme)
+module - no certbot, no cron. Built on the upstream
+`nginxinc/nginx-unprivileged` slim image plus the signed `nginx-module-acme`
+package from nginx.org, so nothing is compiled here. Runs with a read-only root
+filesystem and no capabilities; plain `docker run`, no compose.
 
 See [nginx/README.md](nginx/README.md) for details, and
 [nginx/SYSTEMD.md](nginx/SYSTEMD.md) to run it as a systemd service.

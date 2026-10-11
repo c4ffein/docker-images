@@ -1,6 +1,7 @@
 # Running nginx-acme with systemd
 
-Run the nginx-acme Docker container as a systemd service that uses `/etc/nginx` from your host.
+Run the nginx-acme container as a systemd service that uses `/etc/nginx` from
+your host. Plain `docker run`, no compose.
 
 ## Prerequisites
 
@@ -12,7 +13,7 @@ Run the nginx-acme Docker container as a systemd service that uses `/etc/nginx` 
 ### Quick Install (Automated)
 
 ```bash
-sudo ./install-systemd.sh
+sudo bash install-systemd.sh
 ```
 
 ### Manual Install
@@ -29,8 +30,7 @@ sudo ./install-systemd.sh
 
 3. **Enable and start the service:**
    ```bash
-   sudo systemctl enable nginx-docker.service
-   sudo systemctl start nginx-docker.service
+   sudo systemctl enable --now nginx-docker.service
    ```
 
 4. **Check status:**
@@ -44,7 +44,7 @@ The service uses these directories on the host:
 
 ```
 /etc/nginx/              # nginx configuration (mounted read-only)
-├── nginx.conf           # Main configuration, must keep the load_module line
+├── nginx.conf           # Main configuration, see "Main nginx.conf" below
 ├── mime.types           # Required: nginx.conf includes it
 ├── conf.d/              # Your server blocks
 └── ...                  # fastcgi/scgi/uwsgi params, seeded from the image
@@ -52,13 +52,17 @@ The service uses these directories on the host:
 /var/www/                # Web content (mounted read-only)
 └── html/                # Default web root
 
-/var/nginx-acme/         # ACME state (mounted read-write) - BACK THIS UP
+/var/nginx-acme/         # ACME state (mounted read-write, owned by uid 101) - BACK THIS UP
 ├── letsencrypt/         # account key + certificates, production issuer
 └── letsencrypt-staging/ # same, staging issuer
 ```
 
 Logs are not on disk: the image sends them to stdout/stderr, so they are in
 the journal and in `docker logs`, rotated by Docker (10 MB x 3 files).
+
+The container runs as uid 101. The read-only mounts only need to be
+world-readable; `/var/nginx-acme` must be owned by uid 101, which the unit
+enforces on every start.
 
 ## Configuration
 
@@ -78,13 +82,16 @@ sudo docker run --rm --entrypoint /bin/sh nginx-acme:latest \
     -c 'tar -cf - -C /etc/nginx .' | sudo tar -xf - -C /etc/nginx
 ```
 
-Whatever you end up with must keep the first line of the shipped config:
+Whatever you end up with must keep, from the shipped config:
 
-```nginx
-load_module /usr/lib/nginx/modules/ngx_http_acme_module.so;
-```
+- the first line, `load_module /usr/lib/nginx/modules/ngx_http_acme_module.so;`
+- `pid /tmp/nginx.pid;` and the five `*_temp_path /tmp/...` directives: the
+  container is read-only and runs as uid 101, `/tmp` is the only writable path
+- the `resolver`, `acme_issuer` and `acme_shared_zone` directives in `http`
+- the `location = /healthz` block in the default server, which the image's
+  health check uses
+- no `user` directive: nginx is not root and cannot switch users
 
-and the `resolver`, `acme_issuer` and `acme_shared_zone` directives in `http`.
 Check the host copy against the image's at any time:
 
 ```bash
@@ -133,21 +140,12 @@ that is where the HTTP-01 challenge is answered, by the module itself.
 
 ## Management
 
-### Basic Commands
 ```bash
 sudo systemctl start nginx-docker      # Start
 sudo systemctl stop nginx-docker       # Stop
 sudo systemctl restart nginx-docker    # Restart
 sudo systemctl status nginx-docker     # Check status
-```
-
-### Reload Configuration (Zero Downtime)
-```bash
-# Test config first
-sudo docker exec nginx-acme nginx -t
-
-# Reload if OK
-sudo systemctl reload nginx-docker
+sudo systemctl reload nginx-docker     # nginx -t, then HUP (zero downtime)
 ```
 
 ### View Logs
@@ -163,23 +161,42 @@ If you need log files on disk (fail2ban, goaccess...), do not bind-mount a
 host directory over `/var/log/nginx`: that hides the image's stdout/stderr
 symlinks and nothing rotates the resulting files. Instead, add
 `access_log /var/log/nginx/host/access.log main;` to your server blocks and
-mount a host directory at `/var/log/nginx/host`, with your own logrotate.
+mount a host directory owned by uid 101 at `/var/log/nginx/host`, with your
+own logrotate.
 
-## Features
+## What the unit does
 
-The service includes:
+- **Non-root.** The container runs as uid 101 from start to finish. There is
+  no root phase, no privilege drop, and nothing in the image is setuid.
+- **Read-only root filesystem** with a 64 MB `noexec,nosuid` tmpfs on `/tmp`
+  for the pid file and nginx's temp paths. The only persistent writable mount
+  is `/var/nginx-acme`.
+- **No capabilities** except `NET_BIND_SERVICE`. Under `--network host` the
+  container uses the host's privileged-port rule, so binding 80/443 as uid 101
+  comes from a file capability the image sets on the nginx binary.
+- **No `no-new-privileges`**, deliberately: it disables file capabilities, and
+  with it uid 101 could not bind 80/443 on the host network. See *Bridge
+  networking* below if you would rather have that flag.
+- **Pids limit** of 256.
+- **Health check** from the image: busybox `wget` to `http://127.0.0.1/healthz`
+  every 30s. Docker reports the status; it does not restart on unhealthy.
+- **Log rotation** by Docker's json-file driver, 10 MB x 3 files.
+- **Auto-restart** on failure after 10s, graceful stop with a 30s timeout.
+- **Unit hardening** (`NoNewPrivileges`, `ProtectSystem=strict`,
+  `ProtectHome`) applies to the unit's own process, which is the `docker`
+  client. It does not constrain the container; the `docker run` flags do.
 
-✅ **Health check** - the image's `HEALTHCHECK` curls `http://127.0.0.1/` every 30s
-✅ **Log rotation** - Docker json-file driver, max 10MB per file, 3 files kept
-✅ **Auto-restart** - Restarts on failure with 10s delay
-✅ **Graceful shutdown** - 30s timeout for clean stops
-✅ **Security hardening** - NoNewPrivileges, ProtectSystem, etc. (on the docker client process)
-✅ **ACME persistence** - account key and certificates bind-mounted from `/var/nginx-acme`
-✅ **Host networking** - Direct port access, no NAT overhead
+### Bridge networking
+
+To run with `-p 80:80 -p 443:443` instead of `--network host`, replace
+`--network host` in the unit with the two `-p` flags and add
+`--security-opt no-new-privileges`: on a bridge network Docker sets
+`ip_unprivileged_port_start=0` inside the container, so uid 101 binds low ports
+without any capability and the file capability is unused. Trade-offs: a NAT
+hop, and with Docker's default userland proxy, IPv6 clients show up with the
+gateway's address in the logs rather than their own.
 
 ## Customization
-
-### Environment Variables
 
 Edit `/etc/systemd/system/nginx-docker.service` to change:
 
@@ -188,147 +205,70 @@ Environment="IMAGE=nginx-acme:latest"              # Local image tag
 Environment="CONTAINER_NAME=nginx-acme"            # Container name
 ```
 
-Note: The service uses the locally built image. Rebuild with `make nginx-build` to update.
-
-### Use Bridge Networking
-
-Replace `--network host` with port mapping:
-
-```systemd
-ExecStart=/usr/bin/docker run --rm \
-    --name ${CONTAINER_NAME} \
-    -p 80:80 \
-    -p 443:443 \
-    # ... rest of options
-```
+The service uses the locally built image. Rebuild with `make nginx-build` and
+`sudo systemctl restart nginx-docker` to update.
 
 ## Troubleshooting
 
 ### Service won't start
 
 ```bash
-# Check systemd status
 sudo systemctl status nginx-docker -l
-
-# Check Docker logs
+sudo journalctl -u nginx-docker -n 100
 sudo docker logs nginx-acme
 
-# Test config manually
-sudo docker run --rm \
-  -v /etc/nginx:/etc/nginx:ro \
-  nginx-acme:latest nginx -t
+# Test the host config with the image, as the container would see it
+sudo docker run --rm -v /etc/nginx:/etc/nginx:ro nginx-acme:latest nginx -t
 ```
 
-### Configuration errors
+### Permission denied on /var/nginx-acme
 
-```bash
-# Test before reloading
-sudo docker exec nginx-acme nginx -t
+The directory is not owned by uid 101. The unit chowns it on start, so this
+only happens if you run the image by hand: `sudo chown 101:101 /var/nginx-acme`.
 
-# View error details
-sudo docker logs nginx-acme --tail 50
-```
+### bind() to 0.0.0.0:80 failed (13: Permission denied)
+
+You added `--security-opt no-new-privileges` while keeping `--network host`.
+Remove one of the two; see *Bridge networking*.
 
 ### Port already in use
 
 ```bash
-# Check what's using port 80/443
 sudo ss -tlnp | grep -E ':80|:443'
-
-# Stop conflicting service
 sudo systemctl stop apache2  # or nginx
-```
-
-### Container keeps restarting
-
-```bash
-# Disable auto-restart temporarily
-sudo systemctl stop nginx-docker
-
-# Check logs
-sudo journalctl -u nginx-docker -n 100
-
-# Fix config and restart
-sudo systemctl start nginx-docker
 ```
 
 ## Upgrading
 
 ```bash
-# Rebuild the image with latest changes
 cd /path/to/docker-images
 make nginx-build
-
-# Restart service to use new image
 sudo systemctl restart nginx-docker
 ```
 
-The service always uses the locally built `nginx-acme:latest` image.
-
 ## Backup & Restore
 
-### Backup ACME Certificates
 ```bash
 sudo tar czf acme-backup.tar.gz /var/nginx-acme   # account key + private keys
-```
-
-### Restore ACME Certificates
-```bash
-sudo tar xzf acme-backup.tar.gz -C /
-```
-
-### Backup nginx Config
-```bash
+sudo tar xzf acme-backup.tar.gz -C /               # restore (ownership is in the archive)
 sudo tar czf nginx-config-backup.tar.gz /etc/nginx
 ```
 
 ## Uninstall
 
 ```bash
-# Stop and disable
-sudo systemctl stop nginx-docker
-sudo systemctl disable nginx-docker
-
-# Remove service file
+sudo systemctl disable --now nginx-docker
 sudo rm /etc/systemd/system/nginx-docker.service
-
-# Reload systemd
 sudo systemctl daemon-reload
-
-# Optional: Remove container
 docker rm -f nginx-acme
 
-# Optional: Remove ACME certificates (WARNING: This deletes all certificates!)
+# Optional: remove ACME certificates (WARNING: this deletes all certificates and the account key)
 # sudo rm -rf /var/nginx-acme
 ```
-
-## Security
-
-The service includes security hardening:
-
-- **Read-only mounts** for config and web content
-- **NoNewPrivileges**, **ProtectSystem**, **ProtectHome** on the unit's own
-  process (the `docker` client); they do not constrain the container itself
-- **Log rotation** by Docker prevents disk filling
-
-For additional security:
-- Use Docker user namespaces
-- Configure SELinux/AppArmor policies
-- Enable audit logging
-- Restrict container capabilities
-
-## Performance
-
-The service uses `--network host` for best performance:
-- No NAT/bridge overhead
-- Direct kernel networking
-- Lower latency
-- Higher throughput
-
-For Docker benchmark comparisons, see: https://www.nginx.com/blog/docker-networking/
 
 ## See Also
 
 - [nginx Documentation](http://nginx.org/en/docs/)
 - [nginx-acme Module](https://github.com/nginx/nginx-acme)
+- [nginx-unprivileged image](https://github.com/nginx/docker-nginx-unprivileged)
 - [systemd Service Documentation](https://www.freedesktop.org/software/systemd/man/systemd.service.html)

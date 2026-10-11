@@ -1,5 +1,5 @@
 [Unit]
-Description=nginx with ACME Module (Docker)
+Description=nginx with ACME Module (Docker, non-root, hardened)
 Documentation=https://github.com/nginx/nginx-acme
 After=docker.service network-online.target
 Requires=docker.service
@@ -19,10 +19,28 @@ Environment="CONTAINER_NAME=nginx-acme"
 # Remove any existing container with the same name
 ExecStartPre=-/usr/bin/docker rm -f ${CONTAINER_NAME}
 
-# ACME state directory (account key + certificates). Must survive restarts.
+# ACME state directory (account key + certificates). Must survive restarts, and
+# must be writable by uid 101, the only user the container ever runs as.
 ExecStartPre=/bin/mkdir -p /var/nginx-acme
+ExecStartPre=/bin/chown 101:101 /var/nginx-acme
+ExecStartPre=/bin/chmod 700 /var/nginx-acme
 
 # Start the nginx container. Health check comes from the image itself.
+#
+# Hardening (keep in sync with NGINX_HARDENING in the Makefile):
+#   --read-only + tmpfs /tmp   nothing writable but the pid/temp files and the
+#                              ACME state mount
+#   --cap-drop ALL             the process tree runs as uid 101 and needs no
+#   --cap-add NET_BIND_SERVICE capability except binding 80/443, which under
+#                              --network host comes from a file capability on
+#                              the nginx binary (set in the Dockerfile)
+#   --pids-limit               fork bomb ceiling
+#
+# --security-opt no-new-privileges is deliberately NOT set here: it would also
+# disable that file capability, and uid 101 could no longer bind 80/443 on the
+# host network. If you prefer it, switch to bridge networking (see SYSTEMD.md):
+# there Docker lets unprivileged users bind low ports inside the container and
+# no capability is needed at all.
 #
 # Logs: the image symlinks /var/log/nginx/{access,error}.log to stdout/stderr,
 # so they land in `docker logs` / `journalctl -u nginx-docker`, rotated by the
@@ -35,6 +53,11 @@ ExecStart=/usr/bin/docker run --rm \
     --log-driver json-file \
     --log-opt max-size=10m \
     --log-opt max-file=3 \
+    --read-only \
+    --tmpfs /tmp:rw,noexec,nosuid,size=64m \
+    --cap-drop ALL \
+    --cap-add NET_BIND_SERVICE \
+    --pids-limit 256 \
     -v /etc/nginx:/etc/nginx:ro \
     -v /var/www:/var/www:ro \
     -v /var/nginx-acme:/var/nginx-acme \
@@ -47,7 +70,8 @@ ExecStop=/usr/bin/docker stop -t 30 ${CONTAINER_NAME}
 ExecReload=/bin/sh -c '/usr/bin/docker exec ${CONTAINER_NAME} nginx -t && /usr/bin/docker kill -s HUP ${CONTAINER_NAME}'
 
 # Security settings. These constrain this unit's own processes (the docker
-# client), not the container; ReadWritePaths is what lets ExecStartPre mkdir.
+# client), not the container; ReadWritePaths is what lets ExecStartPre
+# mkdir/chown the state directory.
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict

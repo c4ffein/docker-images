@@ -77,6 +77,8 @@ else
     missing=""
     [ -f /etc/nginx/mime.types ] || missing="$missing mime.types"
     grep -rqs "ngx_http_acme_module.so" /etc/nginx/nginx.conf || missing="$missing load_module(acme)"
+    grep -qs "pid /tmp/nginx.pid" /etc/nginx/nginx.conf || missing="$missing pid=/tmp/nginx.pid(non-root)"
+    grep -qs "location = /healthz" /etc/nginx/nginx.conf || missing="$missing /healthz(healthcheck)"
     if [ -n "$missing" ]; then
         echo -e "${YELLOW}!${NC} Host config looks incomplete, missing:$missing"
         echo "    The container mounts /etc/nginx read-only over the image's copy,"
@@ -99,15 +101,17 @@ else
     echo -e "${YELLOW}!${NC} /var/www/html/ already exists (skipping)"
 fi
 
-# ACME state directory (account key, certificates and private keys).
-# The entrypoint chowns it to the nginx user on every start.
+# ACME state directory (account key, certificates and private keys). The
+# container runs as uid 101 and nothing else, so that uid must own it. The
+# unit re-applies this on every start.
 if [ ! -d /var/nginx-acme ]; then
     mkdir -p /var/nginx-acme
-    chmod 700 /var/nginx-acme
     echo -e "${GREEN}✓${NC} Created /var/nginx-acme/"
 else
-    echo -e "${YELLOW}!${NC} /var/nginx-acme/ already exists (skipping)"
+    echo -e "${YELLOW}!${NC} /var/nginx-acme/ already exists (keeping contents)"
 fi
+chown 101:101 /var/nginx-acme
+chmod 700 /var/nginx-acme
 
 # Install the unit
 echo ""
