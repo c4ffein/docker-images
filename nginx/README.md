@@ -1,242 +1,184 @@
-# nginx with ACME Module (Alpine-based)
+# nginx with the ACME module
 
-A lightweight nginx Docker image based on Alpine Linux with ACME module support for automated SSL/TLS certificate management.
+nginx on Alpine with [`ngx_http_acme_module`](https://github.com/nginx/nginx-acme),
+which obtains and renews Let's Encrypt certificates from inside nginx itself —
+no certbot, no cron job, no reload dance.
 
-## Features
+## What this image is
 
-- Based on Alpine Linux for minimal image size
-- nginx compiled from source with latest stable version
-- ACME module for automated Let's Encrypt certificate management
-- HTTP/2 and HTTP/3 support
-- Multiple dynamic modules included
-- Multi-stage build for optimized image size
-- Security-focused configuration
+Since nginx 1.29 the official `nginx:mainline-alpine` image ships the ACME
+module (`nginx-module-acme`), so this image does **not** compile anything. It is
+the upstream image plus:
 
-## Building the Image
+- a `nginx.conf` that loads the module and declares production + staging issuers
+- an entrypoint that prepares the ACME state directory and fails fast on a bad config
+- a `HEALTHCHECK`
+- a build-time assertion that the module is actually present in the base image
+
+Base image is overridable: `docker build --build-arg NGINX_IMAGE=nginx:1.29-alpine .`
+
+## Quick start
+
+From the repository root:
+
+```bash
+make nginx-build      # build nginx-acme:latest
+make nginx-test       # config + module + HTTP smoke tests
+make nginx-run        # docker compose up -d
+```
+
+Or directly:
 
 ```bash
 cd nginx
-docker build -t nginx-acme:latest .
+docker compose up -d --build
+curl http://localhost
 ```
 
-### Build Arguments
+## Enabling HTTPS
 
-You can customize the build with the following arguments:
+1. Point your domain's A/AAAA records at the host, and make sure port 80 is
+   reachable from the internet — the HTTP-01 challenge needs it.
+2. Copy the example and set your domain:
 
-```bash
-docker build \
-  --build-arg NGINX_VERSION=1.26.2 \
-  --build-arg ACME_MODULE_VERSION=master \
-  -t nginx-acme:latest .
-```
+   ```bash
+   cp examples/tls.conf.example conf.d/example.com.conf
+   sed -i 's/example\.com/yourdomain.tld/g' conf.d/example.com.conf
+   ```
 
-## Running the Container
+3. Start with the **staging** issuer (the example already does). Staging
+   certificates are untrusted by browsers, but its rate limits are far looser
+   than production, so a misconfiguration costs nothing.
+4. Reload and watch the log:
 
-### Basic Usage
+   ```bash
+   docker exec nginx-acme nginx -s reload
+   docker logs -f nginx-acme
+   ```
 
-```bash
-docker run -d \
-  --name nginx-acme \
-  -p 80:80 \
-  -p 443:443 \
-  nginx-acme:latest
-```
+5. Once you see a certificate issued, switch `acme_certificate letsencrypt_staging;`
+   to `acme_certificate letsencrypt;` and reload again.
 
-### With Custom Configuration
-
-```bash
-docker run -d \
-  --name nginx-acme \
-  -p 80:80 \
-  -p 443:443 \
-  -v $(pwd)/custom-nginx.conf:/etc/nginx/nginx.conf:ro \
-  -v $(pwd)/html:/var/www/html \
-  -v nginx-acme-certs:/etc/nginx/acme \
-  nginx-acme:latest
-```
-
-### With Docker Compose
-
-Create a `docker-compose.yml`:
-
-```yaml
-version: '3.8'
-
-services:
-  nginx:
-    build: ./nginx
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./html:/var/www/html
-      - ./conf.d:/etc/nginx/conf.d:ro
-      - nginx-certs:/etc/nginx/acme
-    restart: unless-stopped
-
-volumes:
-  nginx-certs:
-```
-
-Run with:
-
-```bash
-docker-compose up -d
-```
-
-## ACME Module Configuration
-
-The ACME module is loaded dynamically and configured in `nginx.conf`. Here's how to use it:
-
-### Directory Structure
-
-```
-/etc/nginx/acme/
-├── account.key          # ACME account key
-└── certs/              # Directory for certificates
-    └── example.com/
-        ├── fullchain.pem
-        └── privkey.pem
-```
-
-### Requesting Certificates
-
-The ACME module handles certificate requests automatically. Configure your server block:
+The minimal shape of an ACME-managed server block:
 
 ```nginx
 server {
-    listen 80;
+    listen 443 ssl;
     server_name example.com;
 
-    location /.well-known/acme-challenge/ {
-        default_type "text/plain";
-        root /var/www/acme;
-    }
-
-    # Redirect to HTTPS
-    location / {
-        return 301 https://$server_name$request_uri;
-    }
-}
-
-server {
-    listen 443 ssl http2;
-    server_name example.com;
-
-    ssl_certificate /etc/nginx/acme/certs/example.com/fullchain.pem;
-    ssl_certificate_key /etc/nginx/acme/certs/example.com/privkey.pem;
-
-    # Your application configuration
-    location / {
-        root /var/www/html;
-        index index.html;
-    }
+    acme_certificate letsencrypt;
+    ssl_certificate     $acme_certificate;
+    ssl_certificate_key $acme_certificate_key;
+    ssl_certificate_cache max=2;
 }
 ```
 
-## Volumes
+Renewal is automatic; nginx keeps the certificate in the `ngx_acme_shared`
+shared memory zone and refreshes it in the background.
 
-| Path | Description |
-|------|-------------|
-| `/var/www/html` | Web root directory |
-| `/etc/nginx/acme` | ACME certificates and keys |
-| `/etc/nginx/conf.d` | Additional nginx configurations |
-| `/var/log/nginx` | nginx logs (stdout/stderr by default) |
+## Persistence — read this
 
-## Environment Variables
+The ACME account key, the issued certificates and their private keys live under
+`state_path`, which this image sets to `/var/nginx-acme/<issuer>`. **That
+directory must be persisted.** If it is lost, every restart registers a new ACME
+account and re-issues every certificate, which burns Let's Encrypt rate limits
+quickly (50 certificates per registered domain per week).
 
-Currently, the image doesn't use environment variables for configuration. All configuration is done through nginx config files.
+`docker-compose.yml` maps it to the `nginx-acme-state` named volume. The systemd
+unit bind-mounts the host's `/var/nginx-acme`.
 
-## Included Modules
+## Paths
 
-### Static Modules
-- http_ssl_module
-- http_v2_module
-- http_v3_module
-- http_realip_module
-- http_addition_module
-- http_sub_module
-- http_dav_module
-- http_flv_module
-- http_mp4_module
-- http_gunzip_module
-- http_gzip_static_module
-- http_random_index_module
-- http_secure_link_module
-- http_stub_status_module
-- http_auth_request_module
-- stream_ssl_module
-- stream_realip_module
-- And more...
+| Path | Purpose |
+|------|---------|
+| `/var/www/html` | web root of the default server |
+| `/etc/nginx/conf.d` | your server blocks (`include`d last) |
+| `/etc/nginx/nginx.conf` | main config, override to replace it entirely |
+| `/var/nginx-acme` | **ACME state — persist this** (mode 0700, owned by `nginx`) |
+| `/var/log/nginx` | logs; already symlinked to stdout/stderr |
 
-### Dynamic Modules
-- http_xslt_module
-- http_image_filter_module
-- http_geoip_module
-- stream_geoip_module
-- **ngx_http_acme_module**
+## Configuration notes
 
-## Security Considerations
+- **Resolver.** The ACME module requires a `resolver` in the `http` block —
+  nginx does not use the system resolver for runtime lookups. This config lists
+  `1.1.1.1` (Cloudflare), `8.8.8.8` (Google) and `9.9.9.9` (Quad9): three
+  independent operators, so one outage does not stop renewal. Docker's embedded
+  DNS at `127.0.0.11` is deliberately not used, because it does not exist when
+  the container runs with `--network host`, which is how the systemd unit runs
+  it. Note that Quad9 filters known-malicious domains; irrelevant for reaching
+  an ACME server, but it is a behavioural difference from the other two.
+- **Contact address.** Commented out, and worth leaving that way: Let's Encrypt
+  stopped sending expiration notification emails on 2025-06-04, specifically to
+  avoid retaining subscriber email addresses, so the field buys nothing there.
+  If you do want one, set it in your deployment's config rather than in this
+  repo — otherwise anyone deploying a copy registers an ACME account under your
+  address.
+- **Challenge type.** HTTP-01 by default. `tls-alpn-01` is available via
+  `challenge tls-alpn;` inside the issuer block.
 
-1. **Certificate Storage**: Always use Docker volumes for `/etc/nginx/acme` to persist certificates
-2. **Key Permissions**: The entrypoint script sets proper permissions for certificate directories
-3. **Updates**: Regularly rebuild the image to get the latest nginx and security patches
-4. **Configuration**: Review and customize `nginx.conf` for your security requirements
+## Deployment as a systemd service
+
+See [SYSTEMD.md](SYSTEMD.md). Short version: `sudo ./install-systemd.sh` from
+this directory, after `make nginx-build`.
 
 ## Debugging
 
-### View logs
 ```bash
-docker logs nginx-acme
+docker logs nginx-acme                 # ACME errors show up here
+docker exec nginx-acme nginx -t        # validate config
+docker exec nginx-acme nginx -s reload # apply config changes
+docker inspect -f '{{.State.Health.Status}}' nginx-acme
+docker exec nginx-acme ls -la /var/nginx-acme
 ```
 
-### Execute commands in running container
+Common failures:
+
+- **`nginx: [emerg] module ... not found`** — the base image no longer ships
+  `nginx-module-acme` (it is not built for `armhf`, for instance). The build
+  itself asserts this, so a successful build rules it out.
+- **Challenge fails** — port 80 is not reachable from the internet, DNS does not
+  resolve to this host, or something else answers `/.well-known/acme-challenge/`
+  first. The module handles that location itself; do not add your own.
+- **Rate limited** — you lost `/var/nginx-acme` between restarts. See
+  *Persistence* above, and test against the staging issuer.
+
+## Publishing
+
 ```bash
-docker exec -it nginx-acme sh
+make nginx-push DOCKER_REGISTRY=youruser
 ```
 
-### Test nginx configuration
+## Testing
+
 ```bash
-docker exec nginx-acme nginx -t
+make nginx-test      # fast: module present, config parses, HTTP serves, healthy
+make nginx-e2e       # real certificate issuance, offline, ~1 minute
 ```
 
-### Reload nginx configuration
+`make nginx-test` runs `test/run-smoke.sh`: the module file exists, `nginx -t`
+loads it, an `acme_certificate` server block parses, HTTP is served from a
+mounted web root, and the container's health check turns green.
+
+`make nginx-e2e` runs `test/run-e2e.sh`, which stands up
+[Pebble](https://github.com/letsencrypt/pebble) — Let's Encrypt's own test ACME
+server — next to this image and makes nginx actually obtain and serve a
+certificate. No domain, no internet, no Let's Encrypt account involved.
+
+It matters that the drop-in at `test/conf.d/e2e.conf` is loaded by the **real
+`nginx.conf` from the image**, unmodified. So the test fails if the shipped
+config, the module, or the base image drift apart — which a `nginx -t` check
+cannot detect.
+
+Add `--keep` to leave the stack up and poke at it:
+
 ```bash
-docker exec nginx-acme nginx -s reload
+nginx/test/run-e2e.sh --keep
+docker compose -f nginx/test/docker-compose.e2e.yml -p nginx-acme-e2e logs -f nginx
 ```
 
-## Common Issues
+## CI
 
-### ACME Module Not Loading
-
-Check if the module is loaded:
-```bash
-docker exec nginx-acme nginx -V
-```
-
-Look for `--add-dynamic-module=/usr/src/nginx-acme` in the output.
-
-### Certificate Permissions
-
-Ensure the nginx user has read access to certificates:
-```bash
-docker exec nginx-acme ls -la /etc/nginx/acme/certs/
-```
-
-## Publishing to Docker Hub
-
-1. **Tag the image**:
-   ```bash
-   docker tag nginx-acme:latest yourusername/nginx-acme:latest
-   docker tag nginx-acme:latest yourusername/nginx-acme:1.26.2
-   ```
-
-2. **Push to Docker Hub**:
-   ```bash
-   docker push yourusername/nginx-acme:latest
-   docker push yourusername/nginx-acme:1.26.2
-   ```
-
-## CI/CD Pipeline
-
-The GitHub Actions workflow (`.github/workflows/build-nginx.yml`) automatically builds and tests this image on every push to ensure the build process works correctly.
+`.github/workflows/build-nginx.yml` builds for `linux/amd64` and `linux/arm64`
+and runs `make nginx-test` on each. A separate job runs `make nginx-e2e` on
+amd64. CI only adds the build cache and the arm64 build; the checks themselves
+are the Makefile's, so what passes locally is what passes in CI.

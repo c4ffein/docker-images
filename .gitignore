@@ -1,0 +1,8 @@
+# Local runtime data, not part of any image
+nginx/logs/
+nginx/conf.d/*.conf
+
+# OS / editor noise
+.DS_Store
+*.swp
+*~

@@ -6,20 +6,20 @@ on:
       - main
     paths:
       - 'nginx/**'
+      - 'Makefile'
       - '.github/workflows/build-nginx.yml'
   pull_request:
     paths:
       - 'nginx/**'
+      - 'Makefile'
       - '.github/workflows/build-nginx.yml'
   workflow_dispatch:
-
-env:
-  NGINX_VERSION: 1.26.2
 
 jobs:
   build:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         platform: [linux/amd64, linux/arm64]
 
@@ -34,8 +34,11 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      # Built here rather than with `make nginx-build` so the GitHub Actions
+      # layer cache is used and the arm64 variant can be built. The tag matches
+      # what the Makefile expects.
       - name: Build Docker image (${{ matrix.platform }})
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: ./nginx
           platforms: ${{ matrix.platform }}
@@ -44,34 +47,25 @@ jobs:
           load: true
           cache-from: type=gha,scope=${{ matrix.platform }}
           cache-to: type=gha,mode=max,scope=${{ matrix.platform }}
-          build-args: |
-            NGINX_VERSION=${{ env.NGINX_VERSION }}
 
-      - name: Test nginx binary
-        run: |
-          echo "Testing nginx binary..."
-          docker run --rm nginx-acme:latest nginx -v
+      # The tests live in the Makefile (nginx/test/run-smoke.sh) so local runs
+      # and CI check the same thing: module present and loaded, shipped config
+      # and an acme_certificate server block parse, HTTP served, container
+      # healthy.
+      - name: Test image
+        run: make nginx-test
 
-      - name: Test nginx configuration
-        run: |
-          echo "Testing nginx configuration..."
-          docker run --rm nginx-acme:latest nginx -t
+  e2e:
+    name: End-to-end ACME issuance
+    runs-on: ubuntu-latest
+    # amd64 only: this runs a real ACME exchange against a local Pebble server,
+    # which is slow enough under QEMU to be flaky.
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      - name: Test ACME module
-        run: |
-          echo "Testing ACME module..."
-          docker run --rm nginx-acme:latest ls -la /usr/lib/nginx/modules/ngx_http_acme_module.so
-          docker run --rm nginx-acme:latest nginx -V 2>&1 | grep -q "add-dynamic-module=/usr/src/nginx-acme" && echo "ACME module compiled" || exit 1
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-      - name: Test HTTP server
-        run: |
-          echo "Testing HTTP server..."
-          # Create test content
-          mkdir -p /tmp/test-www
-          echo "<html><body>Test OK</body></html>" > /tmp/test-www/index.html
-          # Run nginx with test content mounted
-          docker run -d --name nginx-test -p 8080:80 -v /tmp/test-www:/var/www/html:ro nginx-acme:latest
-          sleep 5
-          curl -f http://localhost:8080 || exit 1
-          docker stop nginx-test
-          docker rm nginx-test
+      - name: Issue a certificate from a local ACME server
+        run: make nginx-e2e

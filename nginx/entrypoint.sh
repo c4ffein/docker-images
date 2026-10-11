@@ -1,16 +1,19 @@
 #!/bin/sh
 set -e
 
-# Create ACME directory (only writable mount)
-mkdir -p /var/nginx-acme/certs
-mkdir -p /var/nginx-acme/acme-challenge
+# The ACME module stores the account key, issued certificates and private keys
+# under state_path (see nginx.conf). Workers run as `nginx`, so that directory
+# must be writable by that user and readable by nobody else.
+ACME_STATE_DIR="${ACME_STATE_DIR:-/var/nginx-acme}"
 
-# Set proper permissions for ACME directory
-chown -R nginx:nginx /var/nginx-acme
+if [ "$(id -u)" = "0" ]; then
+    mkdir -p "$ACME_STATE_DIR"
+    chown -R nginx:nginx "$ACME_STATE_DIR"
+    chmod 700 "$ACME_STATE_DIR"
+fi
 
-# Test nginx configuration
+# Fail fast with a readable error instead of a half-started container.
 echo "Testing nginx configuration..."
 nginx -t
 
-# Execute the main command
 exec "$@"

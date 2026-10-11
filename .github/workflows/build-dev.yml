@@ -1,0 +1,45 @@
+name: Build dev-env
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'dev/**'
+      - 'Makefile'
+      - '.github/workflows/build-dev.yml'
+  pull_request:
+    paths:
+      - 'dev/**'
+      - 'Makefile'
+      - '.github/workflows/build-dev.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    # amd64 only on purpose: this image installs rustup, bun and uv from
+    # upstream installers, which is painfully slow under QEMU emulation.
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Built here rather than with `make dev-build` so the GitHub Actions
+      # layer cache is used. The tag matches what the Makefile expects.
+      - name: Build Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./dev
+          platforms: linux/amd64
+          push: false
+          tags: dev-env:latest
+          load: true
+          cache-from: type=gha,scope=dev
+          cache-to: type=gha,mode=max,scope=dev
+
+      # The tests live in the Makefile so local runs and CI check the same thing.
+      - name: Test image
+        run: make dev-test

@@ -28,6 +28,11 @@ RUN useradd -m -s /bin/bash dev
 USER dev
 WORKDIR /home/dev
 
+# Debian's default .bashrc returns early for non-interactive shells, so the
+# line below only covers interactive use. ENV is what makes `docker run <img>
+# python ...` and `docker exec` work too.
+ENV PATH="/home/dev/.local/bin:/home/dev/.bun/bin:/home/dev/.cargo/bin:${PATH}"
+
 # Setup PATH in .bashrc
 RUN echo 'export PATH="$HOME/.local/bin:$HOME/.bun/bin:$HOME/.cargo/bin:$PATH"' >> ~/.bashrc
 

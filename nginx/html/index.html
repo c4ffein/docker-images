@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>nginx-acme</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 40rem; margin: 4rem auto;
+           padding: 0 1rem; line-height: 1.6; color: #222; background: #fafafa; }
+    code { background: #eee; padding: .1rem .3rem; border-radius: 3px; }
+    @media (prefers-color-scheme: dark) {
+      body { color: #ddd; background: #16181c; } code { background: #2a2d33; }
+    }
+  </style>
+</head>
+<body>
+  <h1>nginx-acme is running</h1>
+  <p>This is the default page served from <code>/var/www/html</code>.</p>
+  <p>To serve your own site, mount a directory over it. To enable HTTPS with
+     automatic certificates, copy <code>examples/tls.conf.example</code> into
+     <code>conf.d/</code> and set your domain.</p>
+</body>
+</html>

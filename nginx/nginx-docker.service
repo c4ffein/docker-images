@@ -19,25 +19,25 @@ Environment="CONTAINER_NAME=nginx-acme"
 # Remove any existing container with the same name
 ExecStartPre=-/usr/bin/docker rm -f ${CONTAINER_NAME}
 
-# Create ACME directory if it doesn't exist
-ExecStartPre=-/bin/mkdir -p /var/nginx-acme
+# ACME state directory (account key + certificates). Must survive restarts.
+ExecStartPre=/bin/mkdir -p /var/nginx-acme
 
-# Start the nginx container with full feature parity
+# Start the nginx container. Health check comes from the image itself.
+#
+# Logs: the image symlinks /var/log/nginx/{access,error}.log to stdout/stderr,
+# so they land in `docker logs` / `journalctl -u nginx-docker`, rotated by the
+# json-file options below. Do NOT bind-mount a host directory over
+# /var/log/nginx: it hides those symlinks, logs silently move to files that
+# nothing rotates, and `docker logs` goes quiet.
 ExecStart=/usr/bin/docker run --rm \
     --name ${CONTAINER_NAME} \
     --network host \
     --log-driver json-file \
     --log-opt max-size=10m \
     --log-opt max-file=3 \
-    --health-cmd="nginx -t" \
-    --health-interval=30s \
-    --health-timeout=10s \
-    --health-retries=3 \
-    --health-start-period=10s \
     -v /etc/nginx:/etc/nginx:ro \
     -v /var/www:/var/www:ro \
     -v /var/nginx-acme:/var/nginx-acme \
-    -v /var/log/nginx:/var/log/nginx \
     ${IMAGE}
 
 # Stop the container gracefully
@@ -46,17 +46,13 @@ ExecStop=/usr/bin/docker stop -t 30 ${CONTAINER_NAME}
 # Reload nginx configuration (test config first, then send HUP signal)
 ExecReload=/bin/sh -c '/usr/bin/docker exec ${CONTAINER_NAME} nginx -t && /usr/bin/docker kill -s HUP ${CONTAINER_NAME}'
 
-# Health check after start
-ExecStartPost=/bin/sleep 3
-ExecStartPost=-/usr/bin/docker exec ${CONTAINER_NAME} nginx -t
-
-# Security settings
+# Security settings. These constrain this unit's own processes (the docker
+# client), not the container; ReadWritePaths is what lets ExecStartPre mkdir.
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadOnlyPaths=/etc
-ReadWritePaths=/var/log/nginx
+ReadWritePaths=/var/nginx-acme
 
 [Install]
 WantedBy=multi-user.target

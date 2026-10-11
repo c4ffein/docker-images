@@ -9,9 +9,13 @@ The easiest way to work with these images is using the Makefile - see `make help
 ## Available Images
 
 ### nginx with ACME Module
-A lightweight nginx image with built-in ACME module support for automated SSL/TLS certificate management, on top of Alpine.
+nginx on Alpine that obtains and renews Let's Encrypt certificates by itself,
+through the official [nginx-acme](https://github.com/nginx/nginx-acme) module -
+no certbot, no cron. Built on the upstream `nginx:mainline-alpine` image, which
+ships the module since nginx 1.29, so nothing is compiled here.
 
-See [nginx/README.md](nginx/README.md) for details.
+See [nginx/README.md](nginx/README.md) for details, and
+[nginx/SYSTEMD.md](nginx/SYSTEMD.md) to run it as a systemd service.
 
 ### Dev Environment
 My own reusable dev environment as a docker image:
@@ -32,6 +36,9 @@ Each image directory contains its own Dockerfile and documentation:
 cd <image-directory>
 docker build -t <image-name>:<tag> .
 ```
+
+`make check` reports the local Docker setup and which of these images are
+already built.
 
 ## CI/CD
 

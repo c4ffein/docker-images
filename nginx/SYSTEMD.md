@@ -44,51 +44,51 @@ The service uses these directories on the host:
 
 ```
 /etc/nginx/              # nginx configuration (mounted read-only)
-├── nginx.conf           # Main configuration
-└── conf.d/              # Additional server configs
+├── nginx.conf           # Main configuration, must keep the load_module line
+├── mime.types           # Required: nginx.conf includes it
+├── conf.d/              # Your server blocks
+└── ...                  # fastcgi/scgi/uwsgi params, seeded from the image
 
 /var/www/                # Web content (mounted read-only)
 └── html/                # Default web root
 
-/var/nginx-acme/         # ACME certificates (mounted read-write)
-├── certs/               # SSL certificates
-└── acme-challenge/      # ACME HTTP-01 challenges
-
-/var/log/nginx/          # nginx logs (optional, also in Docker logs)
+/var/nginx-acme/         # ACME state (mounted read-write) - BACK THIS UP
+├── letsencrypt/         # account key + certificates, production issuer
+└── letsencrypt-staging/ # same, staging issuer
 ```
+
+Logs are not on disk: the image sends them to stdout/stderr, so they are in
+the journal and in `docker logs`, rotated by Docker (10 MB x 3 files).
 
 ## Configuration
 
 ### Main nginx.conf
 
-Create or update `/etc/nginx/nginx.conf`:
+The unit mounts the host's `/etc/nginx` **over** the image's, which hides
+everything the image ships there: `mime.types`, the fastcgi/scgi/uwsgi param
+files, and the `nginx.conf` with its `load_module` line for the ACME module. A
+hand-written host config that only contains `nginx.conf` will fail to start,
+because `include /etc/nginx/mime.types` refers to a file that no longer exists.
+
+So do not write it from scratch. `install-systemd.sh` seeds `/etc/nginx` from
+the image itself. To do it by hand, or to refresh it later:
+
+```bash
+sudo docker run --rm --entrypoint /bin/sh nginx-acme:latest \
+    -c 'tar -cf - -C /etc/nginx .' | sudo tar -xf - -C /etc/nginx
+```
+
+Whatever you end up with must keep the first line of the shipped config:
 
 ```nginx
-user nginx;
-worker_processes auto;
-error_log /var/log/nginx/error.log warn;
-pid /var/run/nginx.pid;
+load_module /usr/lib/nginx/modules/ngx_http_acme_module.so;
+```
 
-events {
-    worker_connections 1024;
-}
+and the `resolver`, `acme_issuer` and `acme_shared_zone` directives in `http`.
+Check the host copy against the image's at any time:
 
-http {
-    include /etc/nginx/mime.types;
-    default_type application/octet-stream;
-
-    log_format main '$remote_addr - $remote_user [$time_local] "$request" '
-                    '$status $body_bytes_sent "$http_referer" '
-                    '"$http_user_agent"';
-
-    access_log /var/log/nginx/access.log main;
-
-    sendfile on;
-    keepalive_timeout 65;
-
-    # Include all conf.d configs
-    include /etc/nginx/conf.d/*.conf;
-}
+```bash
+sudo docker run --rm nginx-acme:latest cat /etc/nginx/nginx.conf | diff - /etc/nginx/nginx.conf
 ```
 
 ### Server Blocks
@@ -99,7 +99,7 @@ Add server configurations in `/etc/nginx/conf.d/`:
 sudo vim /etc/nginx/conf.d/example.com.conf
 ```
 
-Example:
+Plain HTTP:
 ```nginx
 server {
     listen 80;
@@ -112,6 +112,24 @@ server {
     }
 }
 ```
+
+HTTPS with an automatic certificate (see `examples/tls.conf.example` for the
+full version, and start with `letsencrypt_staging` while you validate DNS):
+```nginx
+server {
+    listen 443 ssl;
+    server_name example.com www.example.com;
+    root /var/www/html;
+
+    acme_certificate letsencrypt;
+    ssl_certificate     $acme_certificate;
+    ssl_certificate_key $acme_certificate_key;
+    ssl_certificate_cache max=2;
+}
+```
+
+A listener on port 80 for the same names must stay reachable from the internet:
+that is where the HTTP-01 challenge is answered, by the module itself.
 
 ## Management
 
@@ -134,27 +152,29 @@ sudo systemctl reload nginx-docker
 
 ### View Logs
 ```bash
-# Systemd journal
+# Systemd journal (same content as docker logs)
 sudo journalctl -u nginx-docker -f
 
-# Docker logs
+# Docker logs - ACME issuance and renewal errors show up here
 sudo docker logs -f nginx-acme
-
-# nginx log files
-sudo tail -f /var/log/nginx/access.log
-sudo tail -f /var/log/nginx/error.log
 ```
+
+If you need log files on disk (fail2ban, goaccess...), do not bind-mount a
+host directory over `/var/log/nginx`: that hides the image's stdout/stderr
+symlinks and nothing rotates the resulting files. Instead, add
+`access_log /var/log/nginx/host/access.log main;` to your server blocks and
+mount a host directory at `/var/log/nginx/host`, with your own logrotate.
 
 ## Features
 
 The service includes:
 
-✅ **Health checks** - Automatic config validation every 30s
-✅ **Log rotation** - Max 10MB per file, 3 files kept
+✅ **Health check** - the image's `HEALTHCHECK` curls `http://127.0.0.1/` every 30s
+✅ **Log rotation** - Docker json-file driver, max 10MB per file, 3 files kept
 ✅ **Auto-restart** - Restarts on failure with 10s delay
 ✅ **Graceful shutdown** - 30s timeout for clean stops
-✅ **Security hardening** - NoNewPrivileges, ProtectSystem, etc.
-✅ **ACME persistence** - Certificates in named volume
+✅ **Security hardening** - NoNewPrivileges, ProtectSystem, etc. (on the docker client process)
+✅ **ACME persistence** - account key and certificates bind-mounted from `/var/nginx-acme`
 ✅ **Host networking** - Direct port access, no NAT overhead
 
 ## Customization
@@ -249,7 +269,7 @@ The service always uses the locally built `nginx-acme:latest` image.
 
 ### Backup ACME Certificates
 ```bash
-sudo tar czf acme-backup.tar.gz /var/nginx-acme
+sudo tar czf acme-backup.tar.gz /var/nginx-acme   # account key + private keys
 ```
 
 ### Restore ACME Certificates
@@ -287,10 +307,9 @@ docker rm -f nginx-acme
 The service includes security hardening:
 
 - **Read-only mounts** for config and web content
-- **NoNewPrivileges** prevents privilege escalation
-- **ProtectSystem** makes most of filesystem read-only
-- **ProtectHome** hides home directories
-- **Log rotation** prevents disk filling
+- **NoNewPrivileges**, **ProtectSystem**, **ProtectHome** on the unit's own
+  process (the `docker` client); they do not constrain the container itself
+- **Log rotation** by Docker prevents disk filling
 
 For additional security:
 - Use Docker user namespaces

@@ -11,6 +11,17 @@ README.md
 docker-compose.yml
 Dockerfile*
 
+# Runtime / example data, not part of the image
+html
+conf.d
+examples
+logs
+test
+
+# systemd deployment helpers
+install-systemd.sh
+nginx-docker.service
+
 # IDE
 .vscode
 .idea
