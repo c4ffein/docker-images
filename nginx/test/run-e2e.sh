@@ -33,6 +33,9 @@ IP_NGINX="10.30.50.4"
 C_PEBBLE="$NET-pebble"
 C_DNS="$NET-challtestsrv"
 C_NGINX="$NET-nginx"
+# The module creates its issuer directory under /var/nginx-acme on startup;
+# with --read-only that needs a mount, exactly as in production.
+VOL_STATE="$NET-state"
 
 # Keep in sync with NGINX_HARDENING in the Makefile and nginx-docker.service.
 HARDENING=(
@@ -47,13 +50,14 @@ HARDENING=(
 teardown() {
     docker rm -f "$C_NGINX" "$C_DNS" "$C_PEBBLE" >/dev/null 2>&1 || true
     docker network rm "$NET" >/dev/null 2>&1 || true
+    docker volume rm "$VOL_STATE" >/dev/null 2>&1 || true
 }
 
 cleanup() {
     local rc=$?
     if [ "$KEEP" = "--keep" ]; then
         echo "--keep given, leaving the stack up. Tear down with:"
-        echo "  docker rm -f $C_NGINX $C_DNS $C_PEBBLE && docker network rm $NET"
+        echo "  docker rm -f $C_NGINX $C_DNS $C_PEBBLE && docker network rm $NET && docker volume rm $VOL_STATE"
         return
     fi
     if [ $rc -ne 0 ]; then
@@ -86,6 +90,7 @@ docker run -d --name "$C_DNS" --network "$NET" --ip "$IP_DNS" \
 docker run -d --name "$C_NGINX" --network "$NET" --ip "$IP_NGINX" "${HARDENING[@]}" \
     -p 8443:443 \
     -v "$PWD/conf.d:/etc/nginx/conf.d:ro" \
+    -v "$VOL_STATE:/var/nginx-acme" \
     "$IMAGE" >/dev/null
 
 echo "→ Waiting for nginx to obtain a certificate from Pebble (up to ${TIMEOUT_SECONDS}s)..."

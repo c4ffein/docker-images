@@ -181,6 +181,10 @@ Common failures:
 - **`bind() to 0.0.0.0:80 failed (13: Permission denied)`** — you combined
   `--network host` with `no-new-privileges`, or ran a different image's nginx
   binary. See *Hardening*.
+- **`mkdir() "/var/nginx-acme/..." failed (30: Read-only file system)`** —
+  nothing is mounted at `/var/nginx-acme`. The module creates its issuer
+  directory there on startup, and the image's filesystem is read-only. Mount a
+  volume; see *Persistence*.
 - **`open() "/var/nginx-acme/..." failed (13: Permission denied)`** — the
   mounted state directory is not owned by uid 101.
 - **Challenge fails** — port 80 is not reachable from the internet, DNS does not
